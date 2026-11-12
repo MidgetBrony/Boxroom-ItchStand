@@ -10,7 +10,7 @@ using System.Linq;
 using System.Threading.Tasks;
 using UnityEngine;
 
-[assembly: MelonInfo(typeof(Boxroom_ItchStand.Core), "The Itch Stand", "0.1.6", "Rusty", null)]
+[assembly: MelonInfo(typeof(Boxroom_ItchStand.Core), "The Itch Stand", "0.1.7", "Rusty", null)]
 [assembly: MelonGame("NestedLoop", "BOXROOM")]
 [assembly: MelonAdditionalDependencies("BR_MediaAPI")]
 
@@ -29,9 +29,10 @@ public sealed class Core : MelonMod
         Log = LoggerInstance;
         RegisterMediaType();
         CreatePlaceableData();
+        RegisterPlaceableDataLive();
         ItchLibrary.Instance.LoadCache();
         _ = ItchLibrary.Instance.EnsureDailySelectionAsync();
-        LoggerInstance.Msg("The Itch Stand 0.1.6 initialized locally.");
+        LoggerInstance.Msg("The Itch Stand 0.1.7 initialized locally.");
     }
 
     public override void OnDeinitializeMelon()
@@ -110,6 +111,22 @@ public sealed class Core : MelonMod
         Data.ModScale = 1f;
         Data.IsLoadedFromMod = true;
         Data.SetToolType(EToolType.Placeable);
+    }
+
+    private static void RegisterPlaceableDataLive()
+    {
+        if (Data == null || !Singleton<PlaceableManager>.HasInstance()) return;
+        PlaceableManager manager = Singleton<PlaceableManager>.Instance;
+        if (manager.AllPlaceables != null &&
+            manager.AllPlaceables.All(value => value == null || value.ID != PlaceableId))
+            manager.AllPlaceables.Insert(0, Data);
+
+        var modPlaceables = AccessTools.Field(typeof(PlaceableManager), "modsPlaceables")
+            ?.GetValue(manager) as List<PlaceableData>;
+        if (modPlaceables != null && modPlaceables.All(value => value == null || value.ID != PlaceableId))
+            modPlaceables.Insert(0, Data);
+
+        Log?.Msg("Registered The Itch Stand in the live placeables catalogue.");
     }
 
     internal static PlaceableData FindTemplate()
