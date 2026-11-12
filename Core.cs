@@ -54,7 +54,18 @@ public sealed class Core : MelonMod
         ItchLibrary.Instance.Shutdown();
         MediaApi.Unregister("com.rusty.boxroom.itch-stand");
         ItchStandFactory.ReleaseResources();
-        if (Data != null) UnityEngine.Object.DestroyImmediate(Data);
+        if (Data != null)
+        {
+            if (Singleton<PlaceableManager>.HasInstance())
+            {
+                PlaceableManager manager = Singleton<PlaceableManager>.Instance;
+                manager.AllPlaceables?.Remove(Data);
+                var modPlaceables = AccessTools.Field(typeof(PlaceableManager), "modsPlaceables")
+                    ?.GetValue(manager) as List<PlaceableData>;
+                modPlaceables?.Remove(Data);
+            }
+            UnityEngine.Object.DestroyImmediate(Data);
+        }
         Data = null;
         Template = null;
         Log = null;
