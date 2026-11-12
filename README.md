@@ -4,7 +4,7 @@ A BOXROOM 1.0 furniture mod that turns the native video-rental rack into a daily
 
 ## Behaviour
 
-- Uses BOXROOM's real `Shelf_Video` furniture and native media cases.
+- Uses BOXROOM's real `Shelf_Video` furniture and native GameBox cases.
 - Recolours the stand to itch.io's official `#fa5c5c` brand colour.
 - Adds an official white itch.io logo topper and a physical refresh button.
 - Pulls the official `https://itch.io/games/price-free.xml` feed once per day and caches it locally.

@@ -10,7 +10,7 @@ using System.Linq;
 using System.Threading.Tasks;
 using UnityEngine;
 
-[assembly: MelonInfo(typeof(Boxroom_ItchStand.Core), "The Itch Stand", "0.1.0", "Rusty", null)]
+[assembly: MelonInfo(typeof(Boxroom_ItchStand.Core), "The Itch Stand", "0.1.1", "Rusty", null)]
 [assembly: MelonGame("NestedLoop", "BOXROOM")]
 [assembly: MelonAdditionalDependencies("BR_MediaAPI")]
 
@@ -31,7 +31,7 @@ public sealed class Core : MelonMod
         CreatePlaceableData();
         ItchLibrary.Instance.LoadCache();
         _ = ItchLibrary.Instance.EnsureDailySelectionAsync();
-        LoggerInstance.Msg("The Itch Stand 0.1.0 initialized locally.");
+        LoggerInstance.Msg("The Itch Stand 0.1.1 initialized locally.");
     }
 
     private static void RegisterMediaType()
@@ -57,12 +57,9 @@ public sealed class Core : MelonMod
             }
         };
 
-        // Reuse BR-MediaAPI's standard shelf and held cases, then deliberately
-        // remove the loose/placeable case contract. Itch cases belong to the stand.
-        SharedMediaCasePrefabs.Configure(definition);
-        definition.PlaceableId = null;
-        definition.PlaceableDataFactory = null;
-        definition.LoosePrefabFactory = null;
+        // Itch games use BOXROOM's native GameBox shelf and inspector models.
+        // No loose prefab is registered, so these cases can never become furniture.
+        NativeGameBoxVisuals.Configure(definition);
         MediaApi.Register(definition);
     }
 

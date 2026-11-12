@@ -14,6 +14,8 @@ internal static class ItchStandFactory
     private static readonly Color ItchRed = new(250f / 255f, 92f / 255f, 92f / 255f, 1f);
     private static Texture2D logoTexture;
 
+    internal static Texture2D LogoTexture => LoadLogo();
+
     internal static async Task<GameObject> InstantiateAsync()
     {
         PlaceableData template = Core.FindTemplate();
@@ -36,16 +38,18 @@ internal static class ItchStandFactory
 
     private static void RecolourNativeRack(GameObject root)
     {
+        Shader solidShader = Shader.Find("Universal Render Pipeline/Lit") ?? Shader.Find("Standard");
         foreach (Renderer renderer in root.GetComponentsInChildren<Renderer>(true))
         {
             if (renderer == null || renderer.GetComponentInParent<IShelfItem>() != null) continue;
-            Material[] materials = renderer.materials;
+            Material[] originals = renderer.sharedMaterials;
+            var materials = new Material[Mathf.Max(1, originals.Length)];
             for (int index = 0; index < materials.Length; index++)
             {
-                Material material = materials[index];
-                if (material == null) continue;
+                var material = new Material(solidShader) { color = ItchRed };
                 if (material.HasProperty("_BaseColor")) material.SetColor("_BaseColor", ItchRed);
                 if (material.HasProperty("_Color")) material.SetColor("_Color", ItchRed);
+                materials[index] = material;
             }
             renderer.materials = materials;
         }
@@ -53,14 +57,55 @@ internal static class ItchStandFactory
 
     private static void BuildBranding(Transform root, ItchStandController controller)
     {
-        Bounds local = CalculateLocalBounds(root);
-        float width = Mathf.Max(0.45f, local.size.x * 0.9f);
-        float front = ResolveFront(root, local);
-        float frontZ = front < 0f ? local.min.z - 0.025f : local.max.z + 0.025f;
+        PlaceableMediaContainer[] containers = root.GetComponentsInChildren<PlaceableMediaContainer>(true);
+        if (containers.Length == 0) return;
+
+        Vector3 up = Vector3.up;
+        Vector3 widthAxis = containers[0].LayoutAxis switch
+        {
+            ELayoutAxis.Y => containers[0].transform.up,
+            ELayoutAxis.Z => containers[0].transform.forward,
+            _ => containers[0].transform.right
+        };
+        widthAxis = Vector3.ProjectOnPlane(widthAxis, up).normalized;
+        if (widthAxis.sqrMagnitude < 0.5f) widthAxis = root.right;
+        Vector3 front = Vector3.Cross(widthAxis, up).normalized;
+
+        Vector3 rackCenter = Vector3.zero;
+        Vector3 containerCenter = Vector3.zero;
+        foreach (Renderer renderer in root.GetComponentsInChildren<Renderer>(true)) rackCenter += renderer.bounds.center;
+        Renderer[] rackRenderers = root.GetComponentsInChildren<Renderer>(true);
+        if (rackRenderers.Length > 0) rackCenter /= rackRenderers.Length;
+        foreach (PlaceableMediaContainer container in containers)
+            containerCenter += container.GetComponent<BoxCollider>().bounds.center;
+        containerCenter /= containers.Length;
+        if (Vector3.Dot(containerCenter - rackCenter, front) < 0f) front = -front;
+
+        float minWidth = float.PositiveInfinity;
+        float maxWidth = float.NegativeInfinity;
+        float maxY = float.NegativeInfinity;
+        float frontDepth = float.NegativeInfinity;
+        foreach (PlaceableMediaContainer container in containers)
+        {
+            Bounds bounds = container.GetComponent<BoxCollider>().bounds;
+            foreach (Vector3 corner in WorldCorners(bounds))
+            {
+                float across = Vector3.Dot(corner, widthAxis);
+                minWidth = Mathf.Min(minWidth, across);
+                maxWidth = Mathf.Max(maxWidth, across);
+                maxY = Mathf.Max(maxY, corner.y);
+                frontDepth = Mathf.Max(frontDepth, Vector3.Dot(corner, front));
+            }
+        }
+
+        float width = Mathf.Max(0.45f, (maxWidth - minWidth) * 0.96f);
+        Vector3 widthCenter = widthAxis * ((minWidth + maxWidth) * 0.5f);
+        Vector3 depthCenter = front * (frontDepth + 0.025f);
+        Vector3 topperPosition = widthCenter + depthCenter + up * (maxY + 0.15f);
+        Quaternion facing = Quaternion.LookRotation(front, up);
 
         GameObject topper = CreateCube("itch.io Topper", root, ItchRed);
-        topper.transform.localPosition = new Vector3(local.center.x, local.max.y + 0.13f, local.center.z);
-        topper.transform.localScale = new Vector3(width, 0.24f, Mathf.Max(0.055f, local.size.z * 0.12f));
+        SetWorldTransform(topper.transform, topperPosition, facing, new Vector3(width, 0.22f, 0.055f));
         SetLayerRecursively(topper, root.gameObject.layer);
 
         Texture2D logo = LoadLogo();
@@ -70,25 +115,24 @@ internal static class ItchStandFactory
             float logoHeight = logoWidth * logo.height / logo.width;
             GameObject quad = GameObject.CreatePrimitive(PrimitiveType.Quad);
             quad.name = "Official itch.io Logo";
-            quad.transform.SetParent(root, false);
-            quad.transform.localPosition = new Vector3(local.center.x, local.max.y + 0.13f, frontZ);
-            quad.transform.localRotation = Quaternion.Euler(0f, front > 0f ? 180f : 0f, 0f);
-            quad.transform.localScale = new Vector3(logoWidth, logoHeight, 1f);
+            quad.transform.SetParent(root, true);
+            SetWorldTransform(quad.transform, topperPosition + front * 0.031f, facing, new Vector3(logoWidth, logoHeight, 1f));
             UnityEngine.Object.DestroyImmediate(quad.GetComponent<Collider>());
             Renderer renderer = quad.GetComponent<Renderer>();
-            Shader shader = Shader.Find("Universal Render Pipeline/Unlit") ?? Shader.Find("Unlit/Transparent");
+            Shader shader = Shader.Find("Unlit/Transparent") ?? Shader.Find("Universal Render Pipeline/Unlit");
             var material = new Material(shader) { mainTexture = logo, color = Color.white };
             if (material.HasProperty("_Surface")) material.SetFloat("_Surface", 1f);
             if (material.HasProperty("_Cull")) material.SetFloat("_Cull", 0f);
+            material.renderQueue = 3000;
             renderer.material = material;
             SetLayerRecursively(quad, root.gameObject.layer);
         }
 
         GameObject button = CreateCube("REFRESH Button", root, new Color(0.72f, 0.055f, 0.07f, 1f));
-        button.transform.localPosition = new Vector3(local.max.x - 0.12f, local.min.y + 0.42f, frontZ - front * 0.025f);
-        button.transform.localScale = new Vector3(0.18f, 0.10f, 0.055f);
+        Vector3 buttonPosition = topperPosition + widthAxis * (width * 0.39f) + front * 0.045f;
+        SetWorldTransform(button.transform, buttonPosition, facing, new Vector3(0.12f, 0.075f, 0.035f));
         button.AddComponent<ItchRefreshButton>();
-        AddButtonLabel(button.transform, front);
+        AddButtonLabel(button.transform);
         SetLayerRecursively(button, root.gameObject.layer);
     }
 
@@ -105,12 +149,12 @@ internal static class ItchStandFactory
         return cube;
     }
 
-    private static void AddButtonLabel(Transform button, float front)
+    private static void AddButtonLabel(Transform button)
     {
         var labelObject = new GameObject("REFRESH Label");
         labelObject.transform.SetParent(button, false);
-        labelObject.transform.localPosition = new Vector3(0f, 0f, front < 0f ? -0.51f : 0.51f);
-        labelObject.transform.localRotation = Quaternion.Euler(0f, front > 0f ? 180f : 0f, 0f);
+        labelObject.transform.localPosition = new Vector3(0f, 0f, 0.51f);
+        labelObject.transform.localRotation = Quaternion.identity;
         labelObject.transform.localScale = Vector3.one;
         var text = labelObject.AddComponent<TextMeshPro>();
         text.text = "REFRESH";
@@ -121,6 +165,25 @@ internal static class ItchStandFactory
         text.fontSizeMin = 0.25f;
         text.fontSizeMax = 1.35f;
         text.rectTransform.sizeDelta = new Vector2(1.8f, 0.9f);
+    }
+
+    private static IEnumerable<Vector3> WorldCorners(Bounds bounds)
+    {
+        for (int x = -1; x <= 1; x += 2)
+        for (int y = -1; y <= 1; y += 2)
+        for (int z = -1; z <= 1; z += 2)
+            yield return bounds.center + Vector3.Scale(bounds.extents, new Vector3(x, y, z));
+    }
+
+    private static void SetWorldTransform(Transform value, Vector3 position, Quaternion rotation, Vector3 worldScale)
+    {
+        value.position = position;
+        value.rotation = rotation;
+        Vector3 parentScale = value.parent != null ? value.parent.lossyScale : Vector3.one;
+        value.localScale = new Vector3(
+            worldScale.x / Mathf.Max(0.0001f, Mathf.Abs(parentScale.x)),
+            worldScale.y / Mathf.Max(0.0001f, Mathf.Abs(parentScale.y)),
+            worldScale.z / Mathf.Max(0.0001f, Mathf.Abs(parentScale.z)));
     }
 
     private static Texture2D LoadLogo()

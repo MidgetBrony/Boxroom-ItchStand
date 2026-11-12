@@ -287,7 +287,7 @@ public sealed class ItchLibrary : IMediaLibrary
     private static HttpClient CreateClient()
     {
         var client = new HttpClient { Timeout = TimeSpan.FromSeconds(25) };
-        client.DefaultRequestHeaders.UserAgent.ParseAdd("Boxroom-ItchStand/0.1.0 (+https://itch.io)");
+        client.DefaultRequestHeaders.UserAgent.ParseAdd("Boxroom-ItchStand/0.1.1 (+https://itch.io)");
         return client;
     }
 

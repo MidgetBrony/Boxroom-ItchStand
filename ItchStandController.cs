@@ -97,17 +97,32 @@ public sealed class ItchStandController : MonoBehaviour, IPlaceable
         Initialize();
         IReadOnlyList<IMediaItem> games = ItchLibrary.Instance.GetKnownItems();
         int gameIndex = 0;
+        int[] nextSlots = new int[containers.Length];
+        bool placedInPass = true;
 
-        foreach (PlaceableMediaContainer container in containers)
+        // Distribute cases like a shop display: one on every shelf, then make
+        // another pass. BOXROOM returns these rows bottom-first, so filling a
+        // complete row at a time leaves the upper shelves looking empty.
+        while (gameIndex < games.Count && placedInPass)
         {
-            for (int slot = 0; slot < container.MaxGameCount && gameIndex < games.Count; slot++)
+            placedInPass = false;
+            for (int row = 0; row < containers.Length && gameIndex < games.Count; row++)
             {
+                PlaceableMediaContainer container = containers[row];
                 IMediaItem game = games[gameIndex];
-                if (!container.CanPlaceAt(slot, game, MediaPlacement.FaceOut)) continue;
-                container.PlaceItem(game, slot, MediaPlacement.FaceOut, playPlacedTween: false);
-                gameIndex++;
+                for (int slot = nextSlots[row]; slot < container.MaxGameCount; slot++)
+                {
+                    nextSlots[row] = slot + 1;
+                    // CanPlaceAt also permits another face-out case at a deeper
+                    // stack depth. The stand must use visible shelf cells only.
+                    if (container.IsCellOccupied(slot)) continue;
+                    if (!container.CanPlaceAt(slot, game, MediaPlacement.FaceOut)) continue;
+                    container.PlaceItem(game, slot, MediaPlacement.FaceOut, playPlacedTween: false);
+                    gameIndex++;
+                    placedInPass = true;
+                    break;
+                }
             }
-            if (gameIndex >= games.Count) break;
         }
 
         appliedRevision = ItchLibrary.Instance.Revision;
