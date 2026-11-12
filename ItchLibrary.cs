@@ -1,7 +1,9 @@
 using BR_MediaAPI;
+using HarmonyLib;
 using MelonLoader;
 using MelonLoader.Utils;
 using Newtonsoft.Json;
+using SteamShelf;
 using SteamShelf.Media;
 using System;
 using System.Collections.Generic;
@@ -19,17 +21,37 @@ using UnityEngine;
 
 namespace Boxroom_ItchStand;
 
-public sealed class ItchGameItem : MediaItemBase
+// BOXROOM's shelf and inspector only treat SteamGameData as a real GameBox.
+// Supplying the native model lets ShelfBox, BoxInspector, and the user's
+// disc/floppy interior setting work without a parallel media-box imitation.
+public sealed class ItchGameItem : SteamGameData
 {
+    private readonly byte[] originalCover;
+
     public ItchGameItem(ItchCatalogEntry entry, byte[] cover)
-        : base((eMediaType)Core.MediaTypeId, entry.Id)
+        : base(CreateAppId(entry.Id))
     {
         Title = entry.Title;
         Url = entry.Url;
         Creator = entry.Creator;
         Description = entry.Description;
         Platforms = entry.Platforms;
-        CoverArtBytes = cover;
+        originalCover = cover?.ToArray() ?? Array.Empty<byte>();
+
+        SetNative(nameof(Name), Title);
+        SetNative(nameof(AppType), "custom");
+        SetNative(nameof(ShortDescription), Description);
+        SetNative(nameof(DetailedDescription), Description);
+        SetNative(nameof(AboutTheGame), Description);
+        SetNative(nameof(LaunchExePath), string.Empty);
+        SetNative(nameof(LaunchArguments), string.Empty);
+        SetNative(nameof(Developers), string.IsNullOrWhiteSpace(Creator) ? Array.Empty<string>() : new[] { Creator });
+        SetNative(nameof(Publishers), string.IsNullOrWhiteSpace(Creator) ? Array.Empty<string>() : new[] { Creator });
+        SetNative(nameof(Genres), new[] { "Indie" });
+        SetNative(nameof(IsOwned), true);
+        SetNative(nameof(IsFree), true);
+        SetNative(nameof(MetadataLoaded), true);
+        PrepareNativeAssets();
     }
 
     public string Title { get; }
@@ -37,7 +59,32 @@ public sealed class ItchGameItem : MediaItemBase
     public string Creator { get; }
     public string Description { get; }
     public string Platforms { get; }
-    public override string DisplayName => Title;
+    public string DisplayName => Title;
+
+    internal void PrepareNativeAssets()
+    {
+        bool hasCover = originalCover.Length > 0;
+        if (hasCover)
+        {
+            SetNative(nameof(BoxArtBytes), originalCover.ToArray());
+            SetNative(nameof(DiskArtBytes), originalCover.ToArray());
+            SetNative(nameof(ScreenshotBytes), new List<byte[]> { originalCover.ToArray() });
+        }
+        SetNative(nameof(BoxArtLoaded), hasCover);
+        SetNative(nameof(DiskArtLoaded), hasCover);
+        SetNative(nameof(ScreenshotsLoaded), true);
+    }
+
+    private void SetNative(string property, object value) =>
+        AccessTools.Property(typeof(SteamGameData), property)?.SetValue(this, value);
+
+    private static int CreateAppId(string id)
+    {
+        using SHA256 sha = SHA256.Create();
+        byte[] digest = sha.ComputeHash(Encoding.UTF8.GetBytes(id ?? string.Empty));
+        int value = BitConverter.ToInt32(digest, 0) & 0x3fffffff;
+        return -1000000000 - value;
+    }
 }
 
 public sealed class ItchCatalogEntry
@@ -109,8 +156,14 @@ public sealed class ItchLibrary : IMediaLibrary
 
     public IMediaItem GetItemSync(MediaRef mediaRef)
     {
-        if (mediaRef.Type != HandledType) return null;
-        lock (stateLock) return items.TryGetValue(mediaRef.Id, out ItchGameItem item) ? item : null;
+        lock (stateLock)
+        {
+            if (mediaRef.Type == HandledType)
+                return items.TryGetValue(mediaRef.Id, out ItchGameItem item) ? item : null;
+            if (mediaRef.Type == eMediaType.SteamGame && int.TryParse(mediaRef.Id, out int appId))
+                return items.Values.FirstOrDefault(value => value.AppId == appId);
+            return null;
+        }
     }
 
     public Task<IMediaItem> GetItemAsync(MediaRef mediaRef) => Task.FromResult(GetItemSync(mediaRef));
@@ -313,7 +366,7 @@ public sealed class ItchLibrary : IMediaLibrary
     private static HttpClient CreateClient()
     {
         var client = new HttpClient { Timeout = TimeSpan.FromSeconds(25) };
-        client.DefaultRequestHeaders.UserAgent.ParseAdd("Boxroom-ItchStand/0.1.8 (+https://itch.io)");
+        client.DefaultRequestHeaders.UserAgent.ParseAdd("Boxroom-ItchStand/0.1.9 (+https://itch.io)");
         return client;
     }
 

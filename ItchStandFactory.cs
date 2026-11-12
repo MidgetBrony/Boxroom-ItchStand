@@ -114,6 +114,13 @@ internal static class ItchStandFactory
         Vector3 topperPosition = widthCenter + depthCenter + up * (maxY + 0.105f);
         Quaternion facing = Quaternion.LookRotation(front, up);
 
+        // A shallow cube uses the same transform path as the correctly aligned
+        // refresh button. The previous hand-built world box introduced the long
+        // side arm seen in-game when the rack parent had non-uniform rotation.
+        GameObject header = CreateCube("itch.io Header", root, ItchRed);
+        SetWorldTransform(header.transform, topperPosition, facing, new Vector3(width, 0.19f, 0.025f));
+        SetLayerRecursively(header, root.gameObject.layer);
+
         Texture2D logo = LoadLogo();
         if (logo != null)
         {
@@ -128,7 +135,7 @@ internal static class ItchStandFactory
             renderer.sortingOrder = 10;
             SetWorldTransform(
                 logoObject.transform,
-                topperPosition + front * 0.004f,
+                topperPosition + front * 0.014f,
                 Quaternion.LookRotation(-front, up),
                 new Vector3(logoWidth / sprite.bounds.size.x, logoHeight / sprite.bounds.size.y, 1f));
             SetLayerRecursively(logoObject, root.gameObject.layer);
