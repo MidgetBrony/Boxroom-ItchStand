@@ -114,17 +114,6 @@ internal static class ItchStandFactory
         Vector3 topperPosition = widthCenter + depthCenter + up * (maxY + 0.105f);
         Quaternion facing = Quaternion.LookRotation(front, up);
 
-        GameObject topper = CreateWorldBox(
-            "itch.io Topper",
-            root,
-            topperPosition,
-            widthAxis,
-            up,
-            front,
-            new Vector3(width, 0.19f, 0.025f),
-            ItchRed);
-        SetLayerRecursively(topper, root.gameObject.layer);
-
         Texture2D logo = LoadLogo();
         if (logo != null)
         {
@@ -139,7 +128,7 @@ internal static class ItchStandFactory
             renderer.sortingOrder = 10;
             SetWorldTransform(
                 logoObject.transform,
-                topperPosition + front * 0.014f,
+                topperPosition + front * 0.004f,
                 Quaternion.LookRotation(-front, up),
                 new Vector3(logoWidth / sprite.bounds.size.x, logoHeight / sprite.bounds.size.y, 1f));
             SetLayerRecursively(logoObject, root.gameObject.layer);
@@ -164,54 +153,6 @@ internal static class ItchStandFactory
         if (material.HasProperty("_BaseColor")) material.SetColor("_BaseColor", color);
         renderer.material = material;
         return cube;
-    }
-
-    private static GameObject CreateWorldBox(
-        string name,
-        Transform parent,
-        Vector3 center,
-        Vector3 right,
-        Vector3 up,
-        Vector3 forward,
-        Vector3 size,
-        Color color)
-    {
-        Vector3 r = right.normalized * (size.x * 0.5f);
-        Vector3 u = up.normalized * (size.y * 0.5f);
-        Vector3 f = forward.normalized * (size.z * 0.5f);
-        Vector3[] world =
-        {
-            center - r - u - f, center + r - u - f,
-            center + r + u - f, center - r + u - f,
-            center - r - u + f, center + r - u + f,
-            center + r + u + f, center - r + u + f
-        };
-        var vertices = new Vector3[world.Length];
-        for (int index = 0; index < world.Length; index++)
-            vertices[index] = parent.InverseTransformPoint(world[index]);
-
-        int[] triangles =
-        {
-            0, 2, 1, 0, 3, 2,
-            4, 5, 6, 4, 6, 7,
-            0, 1, 5, 0, 5, 4,
-            3, 7, 6, 3, 6, 2,
-            0, 4, 7, 0, 7, 3,
-            1, 2, 6, 1, 6, 5
-        };
-        var mesh = new Mesh { name = name + " Mesh", vertices = vertices, triangles = triangles };
-        mesh.RecalculateNormals();
-        mesh.RecalculateBounds();
-
-        var result = new GameObject(name);
-        result.transform.SetParent(parent, false);
-        result.AddComponent<MeshFilter>().sharedMesh = mesh;
-        Renderer renderer = result.AddComponent<MeshRenderer>();
-        Shader shader = Shader.Find("Universal Render Pipeline/Lit") ?? Shader.Find("Standard");
-        var material = new Material(shader) { color = color };
-        if (material.HasProperty("_BaseColor")) material.SetColor("_BaseColor", color);
-        renderer.material = material;
-        return result;
     }
 
     private static void AddButtonLabel(Transform button)

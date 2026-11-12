@@ -10,7 +10,7 @@ using System.Linq;
 using System.Threading.Tasks;
 using UnityEngine;
 
-[assembly: MelonInfo(typeof(Boxroom_ItchStand.Core), "The Itch Stand", "0.1.7", "Rusty", null)]
+[assembly: MelonInfo(typeof(Boxroom_ItchStand.Core), "The Itch Stand", "0.1.8", "Rusty", null)]
 [assembly: MelonGame("NestedLoop", "BOXROOM")]
 [assembly: MelonAdditionalDependencies("BR_MediaAPI")]
 
@@ -32,7 +32,7 @@ public sealed class Core : MelonMod
         RegisterPlaceableDataLive();
         ItchLibrary.Instance.LoadCache();
         _ = ItchLibrary.Instance.EnsureDailySelectionAsync();
-        LoggerInstance.Msg("The Itch Stand 0.1.7 initialized locally.");
+        LoggerInstance.Msg("The Itch Stand 0.1.8 initialized locally.");
     }
 
     public override void OnDeinitializeMelon()

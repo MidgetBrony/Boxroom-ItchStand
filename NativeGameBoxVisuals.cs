@@ -14,12 +14,8 @@ internal static class NativeGameBoxVisuals
     internal static void Configure(MediaTypeDefinition definition)
     {
         definition.ShelfFactory = CreateShelfItem;
-        definition.HeldPrefabFactory = CreateInspectorBox;
-        definition.Visuals = new MediaVisualDefinition
-        {
-            OnHeld = ApplyPresentation,
-            OnInspect = ApplyPresentation
-        };
+        definition.HeldPrefabFactory = null;
+        definition.UseGenericInteractionLifecycle = false;
     }
 
     private static IShelfItem CreateShelfItem(Transform parent)
@@ -42,37 +38,47 @@ internal static class NativeGameBoxVisuals
         return adapter;
     }
 
-    private static GameObject CreateInspectorBox()
+    internal static void ApplyToNativeInspector(BoxInspector inspector, ItchGameItem item)
     {
-        Core.Log?.Msg("Creating native itch.io inspector GameBox visual.");
-        BoxInspector inspector = UnityEngine.Object.FindFirstObjectByType<BoxInspector>();
-        if (inspector?.Box == null)
+        if (inspector?.Box == null || item == null) return;
+        Component album = AccessTools.Field(typeof(BoxInspector), "albumBox")?.GetValue(inspector) as Component;
+        Component video = AccessTools.Field(typeof(BoxInspector), "videoBox")?.GetValue(inspector) as Component;
+        if (album != null) AccessTools.Method(album.GetType(), "SetBoxShowing")?.Invoke(album, new object[] { false });
+        if (video != null) AccessTools.Method(video.GetType(), "SetBoxShowing")?.Invoke(video, new object[] { false });
+
+        inspector.Box.SetBoxShowing(true);
+        NativeGameBoxPresentation presentation = inspector.Box.GetComponent<NativeGameBoxPresentation>();
+        if (presentation == null)
         {
-            Core.Log?.Error("BOXROOM's native inspector GameBox is unavailable.");
-            return null;
+            presentation = inspector.Box.gameObject.AddComponent<NativeGameBoxPresentation>();
+            presentation.Capture(inspector.Box);
         }
-
-        Transform source = inspector.Box.transform;
-        Vector3 sourceLocalPosition = source.localPosition;
-        Quaternion sourceLocalRotation = source.localRotation;
-        Vector3 sourceLocalScale = source.localScale;
-
-        GameObject clone = UnityEngine.Object.Instantiate(inspector.Box.gameObject);
-        clone.name = "itch.io Native Inspector GameBox";
-        clone.SetActive(true);
-        Box box = clone.GetComponent<Box>();
-        NativeGameBoxPresentation presentation = clone.AddComponent<NativeGameBoxPresentation>();
-        presentation.Capture(box, sourceLocalPosition, sourceLocalRotation, sourceLocalScale);
-        box?.SetBoxShowing(true);
-        return clone;
+        presentation.Apply(item);
+        InspectUIAnchors anchors = inspector.Box.GetComponent<InspectUIAnchors>();
+        if (anchors != null)
+            AccessTools.Property(typeof(BoxInspector), nameof(BoxInspector.ActiveUIAnchors))?.SetValue(inspector, anchors);
+        Core.Log?.Msg($"Applied '{item.DisplayName}' to BOXROOM's live inspector GameCase.");
     }
+}
 
-    private static void ApplyPresentation(MediaVisualContext context)
+[HarmonyPatch(typeof(BoxInspector), nameof(BoxInspector.SetHeldMedia))]
+[HarmonyPriority(Priority.Last)]
+internal static class ItchNativeInspectorMediaPatch
+{
+    private static void Postfix(BoxInspector __instance, IMediaItem item)
     {
-        if (context?.Visual == null || context.Item is not ItchGameItem item) return;
-        Core.Log?.Msg($"Applying inspector GameBox presentation for '{item.DisplayName}'.");
-        NativeGameBoxPresentation presentation = context.Visual.GetComponent<NativeGameBoxPresentation>();
-        presentation?.Apply(item);
+        if (item is ItchGameItem game) NativeGameBoxVisuals.ApplyToNativeInspector(__instance, game);
+    }
+}
+
+[HarmonyPatch(typeof(BoxInspector), nameof(BoxInspector.OnToolActivated))]
+[HarmonyPriority(Priority.Last)]
+internal static class ItchNativeInspectorActivatedPatch
+{
+    private static void Postfix(BoxInspector __instance)
+    {
+        if (__instance?.heldMediaInfo is ItchGameItem game)
+            NativeGameBoxVisuals.ApplyToNativeInspector(__instance, game);
     }
 }
 
@@ -183,18 +189,9 @@ internal sealed class NativeGameBoxPresentation : MonoBehaviour
     private TextMeshPro coverNameLabel;
     private TextMeshPro diskNameLabel;
     private Texture2D coverTexture;
-    private Box nativeBox;
-    private Vector3 nativeLocalPosition;
-    private Quaternion nativeLocalRotation;
-    private Vector3 nativeLocalScale;
-
-    internal void Capture(Box box, Vector3 localPosition, Quaternion localRotation, Vector3 localScale)
+    internal void Capture(Box box)
     {
         if (box == null) return;
-        nativeBox = box;
-        nativeLocalPosition = localPosition;
-        nativeLocalRotation = localRotation;
-        nativeLocalScale = localScale;
         caseRenderer = BoxRendererField?.GetValue(box) as Renderer;
         diskRenderer = DiskField?.GetValue(box) as Renderer;
         cartridgeRenderer = CartridgeField?.GetValue(box) as Renderer;
@@ -207,10 +204,6 @@ internal sealed class NativeGameBoxPresentation : MonoBehaviour
     internal void Apply(ItchGameItem item)
     {
         if (item == null) return;
-        transform.localPosition = nativeLocalPosition;
-        transform.localRotation = nativeLocalRotation;
-        transform.localScale = nativeLocalScale;
-        nativeBox?.SetBoxShowing(true);
         if (nameLabel != null) nameLabel.text = item.Title;
         if (developerLabel != null) developerLabel.text = item.Creator;
         if (coverNameLabel != null) coverNameLabel.text = item.Title;
