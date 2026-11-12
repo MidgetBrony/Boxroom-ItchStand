@@ -39,6 +39,9 @@ internal static class ItchStandFactory
         RecolourNativeRack(instance);
         ItchStandController controller = instance.AddComponent<ItchStandController>();
         BuildBranding(instance.transform, controller);
+        // The controller is added at runtime, after the native prefab's serialized
+        // placement callbacks were built, so activate it explicitly.
+        controller.OnPlaced();
         return instance;
     }
 

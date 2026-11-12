@@ -18,6 +18,7 @@ public sealed class ItchStandController : MonoBehaviour, IPlaceable
     private bool active;
     private int appliedRevision = -1;
     private Coroutine watchRoutine;
+    private Coroutine refreshRoutine;
 
     public PlaceableSaveState SaveState => saveState;
 
@@ -27,6 +28,9 @@ public sealed class ItchStandController : MonoBehaviour, IPlaceable
     {
         active = true;
         Initialize();
+        ItchLibrary.Instance.OnLibraryReady -= OnLibraryReady;
+        ItchLibrary.Instance.OnLibraryReady += OnLibraryReady;
+        if (ItchLibrary.Instance.IsReady) Fill();
         if (watchRoutine != null) StopCoroutine(watchRoutine);
         watchRoutine = StartCoroutine(WatchSelection());
     }
@@ -43,23 +47,35 @@ public sealed class ItchStandController : MonoBehaviour, IPlaceable
     public void OnPickedUp()
     {
         active = false;
+        ItchLibrary.Instance.OnLibraryReady -= OnLibraryReady;
         if (watchRoutine != null) StopCoroutine(watchRoutine);
         watchRoutine = null;
+        if (refreshRoutine != null) StopCoroutine(refreshRoutine);
+        refreshRoutine = null;
         Clear();
     }
 
     public void OnDeleted()
     {
         active = false;
+        ItchLibrary.Instance.OnLibraryReady -= OnLibraryReady;
         if (watchRoutine != null) StopCoroutine(watchRoutine);
         watchRoutine = null;
+        if (refreshRoutine != null) StopCoroutine(refreshRoutine);
+        refreshRoutine = null;
         Clear();
+    }
+
+    private void OnDestroy()
+    {
+        ItchLibrary.Instance.OnLibraryReady -= OnLibraryReady;
     }
 
     public void RequestRefresh()
     {
-        if (ItchLibrary.Instance.IsRefreshing) return;
-        StartCoroutine(RefreshRoutine());
+        if (refreshRoutine != null || ItchLibrary.Instance.IsRefreshing) return;
+        active = true;
+        refreshRoutine = StartCoroutine(RefreshRoutine());
     }
 
     private IEnumerator RefreshRoutine()
@@ -67,6 +83,13 @@ public sealed class ItchStandController : MonoBehaviour, IPlaceable
         TaskWait wait = new(ItchLibrary.Instance.RerollAsync());
         while (!wait.IsCompleted) yield return null;
         if (wait.Exception != null) Core.Log?.Error($"Itch Stand refresh failed: {wait.Exception.Message}");
+        else if (appliedRevision != ItchLibrary.Instance.Revision) Fill();
+        refreshRoutine = null;
+    }
+
+    private void OnLibraryReady(IReadOnlyList<IMediaItem> _)
+    {
+        if (active) Fill();
     }
 
     private void Initialize()

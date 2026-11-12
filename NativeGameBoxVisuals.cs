@@ -44,6 +44,7 @@ internal static class NativeGameBoxVisuals
 
     private static GameObject CreateInspectorBox()
     {
+        Core.Log?.Msg("Creating native itch.io inspector GameBox visual.");
         BoxInspector inspector = UnityEngine.Object.FindFirstObjectByType<BoxInspector>();
         if (inspector?.Box == null)
         {
@@ -66,6 +67,7 @@ internal static class NativeGameBoxVisuals
     private static void ApplyPresentation(MediaVisualContext context)
     {
         if (context?.Visual == null || context.Item is not ItchGameItem item) return;
+        Core.Log?.Msg($"Applying inspector GameBox presentation for '{item.DisplayName}'.");
         NativeGameBoxPresentation presentation = context.Visual.GetComponent<NativeGameBoxPresentation>();
         presentation?.Apply(item);
     }

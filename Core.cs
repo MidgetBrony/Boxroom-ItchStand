@@ -10,7 +10,7 @@ using System.Linq;
 using System.Threading.Tasks;
 using UnityEngine;
 
-[assembly: MelonInfo(typeof(Boxroom_ItchStand.Core), "The Itch Stand", "0.1.3", "Rusty", null)]
+[assembly: MelonInfo(typeof(Boxroom_ItchStand.Core), "The Itch Stand", "0.1.4", "Rusty", null)]
 [assembly: MelonGame("NestedLoop", "BOXROOM")]
 [assembly: MelonAdditionalDependencies("BR_MediaAPI")]
 
@@ -31,7 +31,7 @@ public sealed class Core : MelonMod
         CreatePlaceableData();
         ItchLibrary.Instance.LoadCache();
         _ = ItchLibrary.Instance.EnsureDailySelectionAsync();
-        LoggerInstance.Msg("The Itch Stand 0.1.3 initialized locally.");
+        LoggerInstance.Msg("The Itch Stand 0.1.4 initialized locally.");
     }
 
     public override void OnDeinitializeMelon()
@@ -187,9 +187,6 @@ internal static class PlaceableSpritePatch
 [HarmonyPatch(typeof(PlayerInteractionTool), "PickupOrPlaceFromCurrentMediaContainer")]
 internal static class InspectOnlyStandPatch
 {
-    private static readonly System.Reflection.FieldInfo Controller =
-        AccessTools.Field(typeof(PlayerTool), "controller");
-
     private static bool Prefix(
         PlayerInteractionTool __instance,
         PlaceableMediaContainer ___currentLookingAtContainer,
@@ -200,22 +197,60 @@ internal static class InspectOnlyStandPatch
             return true;
 
         if (___currentLookingAtShelfItem?.ItemInfo is ItchGameItem game)
-        {
-            PlayerToolController controller = Controller?.GetValue(__instance) as PlayerToolController;
-            BoxInspector inspector = controller?.GetToolClass<BoxInspector>();
-            if (controller == null || inspector == null)
-            {
-                Core.Log?.Error("Could not open BOXROOM's inspector for the selected itch.io game.");
-                return false;
-            }
+            ItchInspectRuntime.Open(__instance, game, "primary");
+        return false;
+    }
+}
 
-            // Mark this as an in-place inspection before activating the native
-            // inspector. That keeps the case on the stand and makes OnToolActivated
-            // use this item instead of the player's (empty) held-media slot.
+// BOXROOM exposes shelf inspection on the secondary/Open binding as well as on
+// the primary pickup path. Both must use the same forced transition or one of
+// the controls can silently remain on PlayerInteraction.
+[HarmonyPatch(typeof(PlayerInteractionTool), "TryInspectLookedAtMediaInPlace")]
+internal static class InspectOnlyStandSecondaryPatch
+{
+    private static bool Prefix(
+        PlayerInteractionTool __instance,
+        PlaceableMediaContainer ___currentLookingAtContainer,
+        IShelfItem ___currentLookingAtShelfItem,
+        ref bool __result)
+    {
+        if (___currentLookingAtContainer == null ||
+            ___currentLookingAtContainer.GetComponentInParent<ItchStandController>() == null ||
+            ___currentLookingAtShelfItem?.ItemInfo is not ItchGameItem game)
+            return true;
+
+        __result = ItchInspectRuntime.Open(__instance, game, "secondary");
+        return false;
+    }
+}
+
+internal static class ItchInspectRuntime
+{
+    private static readonly System.Reflection.FieldInfo Controller =
+        AccessTools.Field(typeof(PlayerTool), "controller");
+
+    internal static bool Open(PlayerInteractionTool interaction, ItchGameItem game, string route)
+    {
+        PlayerToolController controller = Controller?.GetValue(interaction) as PlayerToolController;
+        BoxInspector inspector = controller?.GetToolClass<BoxInspector>();
+        if (controller == null || inspector == null)
+        {
+            Core.Log?.Error($"Inspect ({route}) could not find BOXROOM's inspector tool.");
+            return false;
+        }
+
+        try
+        {
             inspector.BeginInspectInPlace(game, null);
             controller.SetActiveTool(EToolType.None, force: true);
+            Core.Log?.Msg($"Inspect ({route}) opened '{game.DisplayName}' in place.");
+            return true;
         }
-        return false;
+        catch (Exception exception)
+        {
+            Core.Log?.Error($"Inspect ({route}) failed for '{game.DisplayName}': {exception}");
+            return false;
+        }
     }
 }
 
