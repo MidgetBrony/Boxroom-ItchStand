@@ -6,7 +6,9 @@ using System;
 using System.Collections;
 using System.Collections.Generic;
 using System.Linq;
+using HarmonyLib;
 using UnityEngine;
+using UnityEngine.Events;
 
 namespace Boxroom_ItchStand;
 
@@ -173,5 +175,29 @@ public sealed class ItchRefreshButton : MonoBehaviour, IInteractable
 {
     public void OnInteract() => GetComponentInParent<ItchStandController>()?.RequestRefresh();
     public void OnAlternateInteract() => OnInteract();
+}
+
+// The controller is added after the native rack prefab was deserialized, so it
+// is not part of PlacementTag's original UnityEvent listener list. This relay
+// activates it only after BOXROOM commits placement, never while it is a preview.
+internal sealed class ItchStandPlacementRelay : MonoBehaviour
+{
+    private UnityEvent placedEvent;
+    private UnityAction listener;
+
+    private void Awake()
+    {
+        PlacementTag tag = GetComponent<PlacementTag>();
+        ItchStandController controller = GetComponent<ItchStandController>();
+        placedEvent = AccessTools.Field(typeof(PlacementTag), "onPlaced")?.GetValue(tag) as UnityEvent;
+        if (placedEvent == null || controller == null) return;
+        listener = controller.OnPlaced;
+        placedEvent.AddListener(listener);
+    }
+
+    private void OnDestroy()
+    {
+        if (placedEvent != null && listener != null) placedEvent.RemoveListener(listener);
+    }
 }
 
