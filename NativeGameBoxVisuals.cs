@@ -52,15 +52,18 @@ internal static class NativeGameBoxVisuals
             return null;
         }
 
+        Transform source = inspector.Box.transform;
+        Vector3 sourceLocalPosition = source.localPosition;
+        Quaternion sourceLocalRotation = source.localRotation;
+        Vector3 sourceLocalScale = source.localScale;
+
         GameObject clone = UnityEngine.Object.Instantiate(inspector.Box.gameObject);
         clone.name = "itch.io Native Inspector GameBox";
         clone.SetActive(true);
         Box box = clone.GetComponent<Box>();
         NativeGameBoxPresentation presentation = clone.AddComponent<NativeGameBoxPresentation>();
-        presentation.Capture(box);
-        SteamGameDataProvider provider = clone.GetComponent<SteamGameDataProvider>();
-        if (box != null) UnityEngine.Object.DestroyImmediate(box);
-        if (provider != null) UnityEngine.Object.DestroyImmediate(provider);
+        presentation.Capture(box, sourceLocalPosition, sourceLocalRotation, sourceLocalScale);
+        box?.SetBoxShowing(true);
         return clone;
     }
 
@@ -180,10 +183,18 @@ internal sealed class NativeGameBoxPresentation : MonoBehaviour
     private TextMeshPro coverNameLabel;
     private TextMeshPro diskNameLabel;
     private Texture2D coverTexture;
+    private Box nativeBox;
+    private Vector3 nativeLocalPosition;
+    private Quaternion nativeLocalRotation;
+    private Vector3 nativeLocalScale;
 
-    internal void Capture(Box box)
+    internal void Capture(Box box, Vector3 localPosition, Quaternion localRotation, Vector3 localScale)
     {
         if (box == null) return;
+        nativeBox = box;
+        nativeLocalPosition = localPosition;
+        nativeLocalRotation = localRotation;
+        nativeLocalScale = localScale;
         caseRenderer = BoxRendererField?.GetValue(box) as Renderer;
         diskRenderer = DiskField?.GetValue(box) as Renderer;
         cartridgeRenderer = CartridgeField?.GetValue(box) as Renderer;
@@ -196,6 +207,10 @@ internal sealed class NativeGameBoxPresentation : MonoBehaviour
     internal void Apply(ItchGameItem item)
     {
         if (item == null) return;
+        transform.localPosition = nativeLocalPosition;
+        transform.localRotation = nativeLocalRotation;
+        transform.localScale = nativeLocalScale;
+        nativeBox?.SetBoxShowing(true);
         if (nameLabel != null) nameLabel.text = item.Title;
         if (developerLabel != null) developerLabel.text = item.Creator;
         if (coverNameLabel != null) coverNameLabel.text = item.Title;
