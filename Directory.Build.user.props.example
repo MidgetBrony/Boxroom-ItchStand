@@ -1,0 +1,6 @@
+<Project>
+  <PropertyGroup>
+    <GamePath>C:\Path\To\Steam\steamapps\common\My Game Room</GamePath>
+  </PropertyGroup>
+</Project>
+
