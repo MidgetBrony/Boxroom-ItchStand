@@ -10,7 +10,7 @@ using System.Linq;
 using System.Threading.Tasks;
 using UnityEngine;
 
-[assembly: MelonInfo(typeof(Boxroom_ItchStand.Core), "The Itch Stand", "0.1.2", "Rusty", null)]
+[assembly: MelonInfo(typeof(Boxroom_ItchStand.Core), "The Itch Stand", "0.1.3", "Rusty", null)]
 [assembly: MelonGame("NestedLoop", "BOXROOM")]
 [assembly: MelonAdditionalDependencies("BR_MediaAPI")]
 
@@ -31,7 +31,33 @@ public sealed class Core : MelonMod
         CreatePlaceableData();
         ItchLibrary.Instance.LoadCache();
         _ = ItchLibrary.Instance.EnsureDailySelectionAsync();
-        LoggerInstance.Msg("The Itch Stand 0.1.2 initialized locally.");
+        LoggerInstance.Msg("The Itch Stand 0.1.3 initialized locally.");
+    }
+
+    public override void OnDeinitializeMelon()
+    {
+        try
+        {
+            BoxInspector inspector = UnityEngine.Object.FindFirstObjectByType<BoxInspector>();
+            if (inspector?.heldMediaInfo?.Ref.Type == (eMediaType)MediaTypeId)
+                AccessTools.Method(typeof(BoxInspector), "EndView")?.Invoke(inspector, null);
+        }
+        catch (Exception exception)
+        {
+            Log?.Warning($"Could not close the active itch.io inspector during reload: {exception.Message}");
+        }
+
+        foreach (ItchStandController stand in Resources.FindObjectsOfTypeAll<ItchStandController>())
+            if (stand != null && stand.gameObject.scene.IsValid())
+                UnityEngine.Object.DestroyImmediate(stand.gameObject);
+
+        ItchLibrary.Instance.Shutdown();
+        MediaApi.Unregister("com.rusty.boxroom.itch-stand");
+        ItchStandFactory.ReleaseResources();
+        if (Data != null) UnityEngine.Object.DestroyImmediate(Data);
+        Data = null;
+        Template = null;
+        Log = null;
     }
 
     private static void RegisterMediaType()

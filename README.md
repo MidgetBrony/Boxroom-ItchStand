@@ -11,6 +11,7 @@ A BOXROOM 1.0 furniture mod that turns the native video-rental rack into a daily
 - Chooses a deterministic daily random selection; the refresh button rerolls it immediately.
 - Cases open directly in BOXROOM's inspector and return to the stand. They never enter inventory or placement mode.
 - The inspector action opens the selected game's itch.io page.
+- Supports BOXROOM Hot Reload and deploys its approval marker automatically. Use hot reload's save/reload-room option so placed stands are reconstructed from the room save.
 
 Cache data is stored under `UserData/Boxroom-ItchStand`.
 
@@ -22,5 +23,5 @@ Copy `Directory.Build.user.props.example` to `Directory.Build.user.props`, set `
 dotnet build -c Release -p:DeployToGame=false
 ```
 
-Requires BR-MediaAPI 1.1.15 or newer.
+Requires BR-MediaAPI 1.1.16 or newer.
 

@@ -16,6 +16,12 @@ internal static class ItchStandFactory
 
     internal static Texture2D LogoTexture => LoadLogo();
 
+    internal static void ReleaseResources()
+    {
+        if (logoTexture != null) UnityEngine.Object.DestroyImmediate(logoTexture);
+        logoTexture = null;
+    }
+
     internal static async Task<GameObject> InstantiateAsync()
     {
         PlaceableData template = Core.FindTemplate();

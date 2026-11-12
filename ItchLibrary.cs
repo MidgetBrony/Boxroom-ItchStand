@@ -71,6 +71,7 @@ public sealed class ItchLibrary : IMediaLibrary
     private readonly object stateLock = new();
     private Dictionary<string, ItchGameItem> items = new(StringComparer.OrdinalIgnoreCase);
     private ItchCatalogCache cache = new();
+    private bool shutdown;
 
     public eMediaType HandledType => (eMediaType)Core.MediaTypeId;
     public bool IsReady { get; private set; }
@@ -78,6 +79,24 @@ public sealed class ItchLibrary : IMediaLibrary
     public bool IsRefreshing { get; private set; }
     public event Action<IMediaItem> OnItemReady;
     public event Action<IReadOnlyList<IMediaItem>> OnLibraryReady;
+
+    public void Shutdown()
+    {
+        shutdown = true;
+        Client.CancelPendingRequests();
+        lock (stateLock)
+        {
+            foreach (ItchGameItem item in items.Values)
+            {
+                item.IsSpawned = false;
+                item.IsInHand = false;
+            }
+            items.Clear();
+            IsReady = false;
+        }
+        OnItemReady = null;
+        OnLibraryReady = null;
+    }
 
     private static string Root => Path.Combine(MelonEnvironment.UserDataDirectory, "Boxroom-ItchStand");
     private static string CachePath => Path.Combine(Root, "catalog.json");
@@ -117,9 +136,11 @@ public sealed class ItchLibrary : IMediaLibrary
 
     public async Task EnsureDailySelectionAsync()
     {
+        if (shutdown) return;
         await refreshLock.WaitAsync();
         try
         {
+            if (shutdown) return;
             IsRefreshing = true;
             string today = DateTime.Now.ToString("yyyy-MM-dd");
             bool needsFeed = cache.Entries.Count == 0 || !string.Equals(cache.CatalogDate, today, StringComparison.Ordinal);
@@ -152,9 +173,11 @@ public sealed class ItchLibrary : IMediaLibrary
 
     public async Task RerollAsync()
     {
+        if (shutdown) return;
         await refreshLock.WaitAsync();
         try
         {
+            if (shutdown) return;
             IsRefreshing = true;
             cache.Reroll++;
             SaveCache();
@@ -181,6 +204,7 @@ public sealed class ItchLibrary : IMediaLibrary
 
     private async Task BuildSelectionAsync()
     {
+        if (shutdown) return;
         List<ItchCatalogEntry> selected = SelectEntries();
         var ready = new Dictionary<string, ItchGameItem>(StringComparer.OrdinalIgnoreCase);
         foreach (ItchCatalogEntry entry in selected)
@@ -200,11 +224,13 @@ public sealed class ItchLibrary : IMediaLibrary
             }
             ready[entry.Id] = new ItchGameItem(entry, cover);
         }
+        if (shutdown) return;
         Publish(ready);
     }
 
     private void Publish(Dictionary<string, ItchGameItem> ready)
     {
+        if (shutdown) return;
         lock (stateLock)
         {
             foreach (ItchGameItem old in items.Values)
@@ -287,7 +313,7 @@ public sealed class ItchLibrary : IMediaLibrary
     private static HttpClient CreateClient()
     {
         var client = new HttpClient { Timeout = TimeSpan.FromSeconds(25) };
-        client.DefaultRequestHeaders.UserAgent.ParseAdd("Boxroom-ItchStand/0.1.2 (+https://itch.io)");
+        client.DefaultRequestHeaders.UserAgent.ParseAdd("Boxroom-ItchStand/0.1.3 (+https://itch.io)");
         return client;
     }
 
