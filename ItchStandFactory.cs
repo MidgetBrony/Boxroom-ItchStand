@@ -100,37 +100,37 @@ internal static class ItchStandFactory
 
         float width = Mathf.Max(0.45f, (maxWidth - minWidth) * 0.96f);
         Vector3 widthCenter = widthAxis * ((minWidth + maxWidth) * 0.5f);
-        Vector3 depthCenter = front * (frontDepth + 0.025f);
-        Vector3 topperPosition = widthCenter + depthCenter + up * (maxY + 0.15f);
+        Vector3 depthCenter = front * (frontDepth + 0.012f);
+        Vector3 topperPosition = widthCenter + depthCenter + up * (maxY + 0.105f);
         Quaternion facing = Quaternion.LookRotation(front, up);
 
         GameObject topper = CreateCube("itch.io Topper", root, ItchRed);
-        SetWorldTransform(topper.transform, topperPosition, facing, new Vector3(width, 0.22f, 0.055f));
+        SetWorldTransform(topper.transform, topperPosition, facing, new Vector3(width, 0.19f, 0.025f));
         SetLayerRecursively(topper, root.gameObject.layer);
 
         Texture2D logo = LoadLogo();
         if (logo != null)
         {
-            float logoWidth = width * 0.76f;
+            float logoWidth = width * 0.68f;
             float logoHeight = logoWidth * logo.height / logo.width;
-            GameObject quad = GameObject.CreatePrimitive(PrimitiveType.Quad);
-            quad.name = "Official itch.io Logo";
-            quad.transform.SetParent(root, true);
-            SetWorldTransform(quad.transform, topperPosition + front * 0.031f, facing, new Vector3(logoWidth, logoHeight, 1f));
-            UnityEngine.Object.DestroyImmediate(quad.GetComponent<Collider>());
-            Renderer renderer = quad.GetComponent<Renderer>();
-            Shader shader = Shader.Find("Unlit/Transparent") ?? Shader.Find("Universal Render Pipeline/Unlit");
-            var material = new Material(shader) { mainTexture = logo, color = Color.white };
-            if (material.HasProperty("_Surface")) material.SetFloat("_Surface", 1f);
-            if (material.HasProperty("_Cull")) material.SetFloat("_Cull", 0f);
-            material.renderQueue = 3000;
-            renderer.material = material;
-            SetLayerRecursively(quad, root.gameObject.layer);
+            Sprite sprite = Sprite.Create(logo, new Rect(0f, 0f, logo.width, logo.height), new Vector2(0.5f, 0.5f), 100f);
+            var logoObject = new GameObject("Official itch.io Logo");
+            logoObject.transform.SetParent(root, false);
+            SpriteRenderer renderer = logoObject.AddComponent<SpriteRenderer>();
+            renderer.sprite = sprite;
+            renderer.color = Color.white;
+            renderer.sortingOrder = 10;
+            SetWorldTransform(
+                logoObject.transform,
+                topperPosition + front * 0.014f,
+                Quaternion.LookRotation(-front, up),
+                new Vector3(logoWidth / sprite.bounds.size.x, logoHeight / sprite.bounds.size.y, 1f));
+            SetLayerRecursively(logoObject, root.gameObject.layer);
         }
 
         GameObject button = CreateCube("REFRESH Button", root, new Color(0.72f, 0.055f, 0.07f, 1f));
-        Vector3 buttonPosition = topperPosition + widthAxis * (width * 0.39f) + front * 0.045f;
-        SetWorldTransform(button.transform, buttonPosition, facing, new Vector3(0.12f, 0.075f, 0.035f));
+        Vector3 buttonPosition = topperPosition + widthAxis * (width * 0.39f) + front * 0.025f;
+        SetWorldTransform(button.transform, buttonPosition, facing, new Vector3(0.12f, 0.065f, 0.025f));
         button.AddComponent<ItchRefreshButton>();
         AddButtonLabel(button.transform);
         SetLayerRecursively(button, root.gameObject.layer);
@@ -154,7 +154,7 @@ internal static class ItchStandFactory
         var labelObject = new GameObject("REFRESH Label");
         labelObject.transform.SetParent(button, false);
         labelObject.transform.localPosition = new Vector3(0f, 0f, 0.51f);
-        labelObject.transform.localRotation = Quaternion.identity;
+        labelObject.transform.localRotation = Quaternion.Euler(0f, 180f, 0f);
         labelObject.transform.localScale = Vector3.one;
         var text = labelObject.AddComponent<TextMeshPro>();
         text.text = "REFRESH";
@@ -179,11 +179,14 @@ internal static class ItchStandFactory
     {
         value.position = position;
         value.rotation = rotation;
-        Vector3 parentScale = value.parent != null ? value.parent.lossyScale : Vector3.one;
+        // lossyScale is measured on this already-rotated transform, so it also
+        // accounts for the rack prefab's rotated/non-uniform parent axes.
+        value.localScale = Vector3.one;
+        Vector3 actualScale = value.lossyScale;
         value.localScale = new Vector3(
-            worldScale.x / Mathf.Max(0.0001f, Mathf.Abs(parentScale.x)),
-            worldScale.y / Mathf.Max(0.0001f, Mathf.Abs(parentScale.y)),
-            worldScale.z / Mathf.Max(0.0001f, Mathf.Abs(parentScale.z)));
+            worldScale.x / Mathf.Max(0.0001f, Mathf.Abs(actualScale.x)),
+            worldScale.y / Mathf.Max(0.0001f, Mathf.Abs(actualScale.y)),
+            worldScale.z / Mathf.Max(0.0001f, Mathf.Abs(actualScale.z)));
     }
 
     private static Texture2D LoadLogo()

@@ -10,7 +10,7 @@ using System.Linq;
 using System.Threading.Tasks;
 using UnityEngine;
 
-[assembly: MelonInfo(typeof(Boxroom_ItchStand.Core), "The Itch Stand", "0.1.1", "Rusty", null)]
+[assembly: MelonInfo(typeof(Boxroom_ItchStand.Core), "The Itch Stand", "0.1.2", "Rusty", null)]
 [assembly: MelonGame("NestedLoop", "BOXROOM")]
 [assembly: MelonAdditionalDependencies("BR_MediaAPI")]
 
@@ -31,7 +31,7 @@ public sealed class Core : MelonMod
         CreatePlaceableData();
         ItchLibrary.Instance.LoadCache();
         _ = ItchLibrary.Instance.EnsureDailySelectionAsync();
-        LoggerInstance.Msg("The Itch Stand 0.1.1 initialized locally.");
+        LoggerInstance.Msg("The Itch Stand 0.1.2 initialized locally.");
     }
 
     private static void RegisterMediaType()
@@ -150,8 +150,8 @@ internal static class PlaceableSpritePatch
 [HarmonyPatch(typeof(PlayerInteractionTool), "PickupOrPlaceFromCurrentMediaContainer")]
 internal static class InspectOnlyStandPatch
 {
-    private static readonly System.Reflection.MethodInfo InspectInPlace =
-        AccessTools.Method(typeof(PlayerInteractionTool), "TryInspectLookedAtMediaInPlace");
+    private static readonly System.Reflection.FieldInfo Controller =
+        AccessTools.Field(typeof(PlayerTool), "controller");
 
     private static bool Prefix(
         PlayerInteractionTool __instance,
@@ -162,8 +162,22 @@ internal static class InspectOnlyStandPatch
             ___currentLookingAtContainer.GetComponentInParent<ItchStandController>() == null)
             return true;
 
-        if (___currentLookingAtShelfItem?.ItemInfo is ItchGameItem)
-            InspectInPlace?.Invoke(__instance, null);
+        if (___currentLookingAtShelfItem?.ItemInfo is ItchGameItem game)
+        {
+            PlayerToolController controller = Controller?.GetValue(__instance) as PlayerToolController;
+            BoxInspector inspector = controller?.GetToolClass<BoxInspector>();
+            if (controller == null || inspector == null)
+            {
+                Core.Log?.Error("Could not open BOXROOM's inspector for the selected itch.io game.");
+                return false;
+            }
+
+            // Mark this as an in-place inspection before activating the native
+            // inspector. That keeps the case on the stand and makes OnToolActivated
+            // use this item instead of the player's (empty) held-media slot.
+            inspector.BeginInspectInPlace(game, null);
+            controller.SetActiveTool(EToolType.None, force: true);
+        }
         return false;
     }
 }
