@@ -1,71 +1,46 @@
-using MelonLoader;
+using SteamShelf;
 using SteamShelf.Media;
 using SteamShelf.Placeables;
-using SteamShelf.Save;
 using System;
 using System.Collections;
 using System.Collections.Generic;
 using System.Linq;
-using HarmonyLib;
 using UnityEngine;
-using UnityEngine.Events;
 
 namespace Boxroom_ItchStand;
 
-public sealed class ItchStandController : MonoBehaviour, IPlaceable
+// Deliberately not an IPlaceable. BOXROOM's native Shelf remains the only
+// placeable/save owner; this component only places BOXROOM-registered Custom
+// Games into the native rows.
+public sealed class ItchStandController : MonoBehaviour
 {
-    private PlaceableSaveState saveState;
-    private PlaceableMediaContainer[] containers = Array.Empty<PlaceableMediaContainer>();
-    private bool initialized;
+    private PlaceableMediaContainer[] rows = Array.Empty<PlaceableMediaContainer>();
     private bool active;
-    private int appliedRevision = -1;
-    private Coroutine watchRoutine;
     private Coroutine refreshRoutine;
+    private Coroutine fillRoutine;
 
-    public PlaceableSaveState SaveState => saveState;
+    private void Awake() => rows = GetComponentsInChildren<PlaceableMediaContainer>(true);
 
-    private void Awake() => containers = GetComponentsInChildren<PlaceableMediaContainer>(true);
-
-    public void OnPlaced()
+    internal void OnNativeShelfReady()
     {
-        active = true;
-        Initialize();
-        ItchLibrary.Instance.OnLibraryReady -= OnLibraryReady;
-        ItchLibrary.Instance.OnLibraryReady += OnLibraryReady;
-        if (ItchLibrary.Instance.IsReady) Fill();
-        if (watchRoutine != null) StopCoroutine(watchRoutine);
-        watchRoutine = StartCoroutine(WatchSelection());
+        if (!active)
+        {
+            active = true;
+            ItchLibrary.Instance.OnLibraryReady -= OnLibraryReady;
+            ItchLibrary.Instance.OnLibraryReady += OnLibraryReady;
+        }
+
+        if (ItchLibrary.Instance.IsReady) RequestFill();
     }
 
-    public void PopulateFromLoad(PlaceableSaveState state)
-    {
-        saveState = state;
-        OnPlaced();
-    }
-
-    public void LinkSaveState(PlaceableSaveState state) => saveState = state;
-    public void RefreshSaveStateReference(PlaceableSaveState state) => saveState = state;
-
-    public void OnPickedUp()
+    internal void OnNativeShelfPickedUp()
     {
         active = false;
         ItchLibrary.Instance.OnLibraryReady -= OnLibraryReady;
-        if (watchRoutine != null) StopCoroutine(watchRoutine);
-        watchRoutine = null;
         if (refreshRoutine != null) StopCoroutine(refreshRoutine);
+        if (fillRoutine != null) StopCoroutine(fillRoutine);
         refreshRoutine = null;
-        Clear();
-    }
-
-    public void OnDeleted()
-    {
-        active = false;
-        ItchLibrary.Instance.OnLibraryReady -= OnLibraryReady;
-        if (watchRoutine != null) StopCoroutine(watchRoutine);
-        watchRoutine = null;
-        if (refreshRoutine != null) StopCoroutine(refreshRoutine);
-        refreshRoutine = null;
-        Clear();
+        fillRoutine = null;
     }
 
     private void OnDestroy()
@@ -76,7 +51,6 @@ public sealed class ItchStandController : MonoBehaviour, IPlaceable
     public void RequestRefresh()
     {
         if (refreshRoutine != null || ItchLibrary.Instance.IsRefreshing) return;
-        active = true;
         refreshRoutine = StartCoroutine(RefreshRoutine());
     }
 
@@ -84,65 +58,74 @@ public sealed class ItchStandController : MonoBehaviour, IPlaceable
     {
         TaskWait wait = new(ItchLibrary.Instance.RerollAsync());
         while (!wait.IsCompleted) yield return null;
-        if (wait.Exception != null) Core.Log?.Error($"Itch Stand refresh failed: {wait.Exception.Message}");
-        else if (appliedRevision != ItchLibrary.Instance.Revision) Fill();
+        if (wait.Exception != null)
+            Core.Log?.Error($"Itch Stand refresh failed: {wait.Exception.Message}");
         refreshRoutine = null;
     }
 
-    private void OnLibraryReady(IReadOnlyList<IMediaItem> _)
+    private void OnLibraryReady(IReadOnlyList<SteamGameData> _)
     {
-        if (active) Fill();
+        if (active) RequestFill();
     }
 
-    private void Initialize()
+    private void RequestFill()
     {
-        if (initialized) return;
-        containers = GetComponentsInChildren<PlaceableMediaContainer>(true);
-        foreach (PlaceableMediaContainer container in containers)
+        if (!active || !ItchLibrary.Instance.IsReady) return;
+        if (fillRoutine != null) StopCoroutine(fillRoutine);
+        fillRoutine = StartCoroutine(FillNativeShelfRoutine());
+    }
+
+    private IEnumerator FillNativeShelfRoutine()
+    {
+        rows = GetComponentsInChildren<PlaceableMediaContainer>(true)
+            .OrderByDescending(row => transform.InverseTransformPoint(row.transform.position).y)
+            .ToArray();
+        foreach (PlaceableMediaContainer row in rows)
+            row.ClearAll();
+
+        // PlaceableMediaContainer.ClearAll uses Unity Destroy, so its old case
+        // colliders remain until the end of this frame. Refilling immediately
+        // makes CanPlaceAt reject one of those still-blocked cells.
+        yield return null;
+        if (!active)
         {
-            container.Initialise();
-            container.RestrictPlacements(MediaPlacementFlags.FaceOut, MediaPlacement.FaceOut);
+            fillRoutine = null;
+            yield break;
         }
-        initialized = true;
-    }
 
-    private IEnumerator WatchSelection()
-    {
-        while (active)
+        rows = GetComponentsInChildren<PlaceableMediaContainer>(true)
+            .OrderByDescending(row => transform.InverseTransformPoint(row.transform.position).y)
+            .ToArray();
+        foreach (PlaceableMediaContainer row in rows)
         {
-            if (ItchLibrary.Instance.IsReady && appliedRevision != ItchLibrary.Instance.Revision)
-                Fill();
-            yield return new WaitForSeconds(0.25f);
+            row.Initialise();
+            row.RestrictPlacements(MediaPlacementFlags.FaceOut, MediaPlacement.FaceOut);
         }
-    }
 
-    private void Fill()
-    {
-        Clear();
-        Initialize();
-        IReadOnlyList<IMediaItem> games = ItchLibrary.Instance.GetKnownItems();
+        SteamGameData refreshGame = ItchLibrary.Instance.GetRefreshGame();
+        bool refreshPlaced = refreshGame != null && rows.Length > 0 &&
+            PlaceRefreshCase(rows[0], refreshGame);
+
+        IReadOnlyList<SteamGameData> games = ItchLibrary.Instance.GetKnownGames();
         int gameIndex = 0;
-        int[] nextSlots = new int[containers.Length];
+        int[] nextSlots = new int[rows.Length];
         bool placedInPass = true;
 
-        // Distribute cases like a shop display: one on every shelf, then make
-        // another pass. BOXROOM returns these rows bottom-first, so filling a
-        // complete row at a time leaves the upper shelves looking empty.
+        // Use BOXROOM's own rows and PlaceItem path. Distribute one visible
+        // SteamGameData case per row on each pass.
         while (gameIndex < games.Count && placedInPass)
         {
             placedInPass = false;
-            for (int row = 0; row < containers.Length && gameIndex < games.Count; row++)
+            for (int rowIndex = 0; rowIndex < rows.Length && gameIndex < games.Count; rowIndex++)
             {
-                PlaceableMediaContainer container = containers[row];
-                IMediaItem game = games[gameIndex];
-                for (int slot = nextSlots[row]; slot < container.MaxGameCount; slot++)
+                PlaceableMediaContainer row = rows[rowIndex];
+                SteamGameData game = games[gameIndex];
+                for (int slot = nextSlots[rowIndex]; slot < row.MaxGameCount; slot++)
                 {
-                    nextSlots[row] = slot + 1;
-                    // CanPlaceAt also permits another face-out case at a deeper
-                    // stack depth. The stand must use visible shelf cells only.
-                    if (container.IsCellOccupied(slot)) continue;
-                    if (!container.CanPlaceAt(slot, game, MediaPlacement.FaceOut)) continue;
-                    container.PlaceItem(game, slot, MediaPlacement.FaceOut, playPlacedTween: false);
+                    nextSlots[rowIndex] = slot + 1;
+                    if (row.IsCellOccupied(slot)) continue;
+                    if (!row.CanPlaceAt(slot, game, MediaPlacement.FaceOut)) continue;
+                    row.PlaceItem(game, slot, MediaPlacement.FaceOut, playPlacedTween: false);
                     gameIndex++;
                     placedInPass = true;
                     break;
@@ -150,16 +133,27 @@ public sealed class ItchStandController : MonoBehaviour, IPlaceable
             }
         }
 
-        appliedRevision = ItchLibrary.Instance.Revision;
-        Core.Log?.Msg($"Filled The Itch Stand with {gameIndex} cases.");
+        Core.Log?.Msg(
+            $"Filled native BOXROOM shelf with {gameIndex} itch.io games and refresh case={refreshPlaced}.");
+        fillRoutine = null;
     }
 
-    private void Clear()
+    private static bool PlaceRefreshCase(PlaceableMediaContainer topRow, SteamGameData refreshGame)
     {
-        if (containers == null) return;
-        foreach (PlaceableMediaContainer container in containers)
-            if (container != null) container.ClearAll();
-        initialized = false;
+        int span = MediaFootprint.OccupancyCellsFor(
+            eMediaType.SteamGame, MediaPlacement.FaceOut, ELayoutAxis.X);
+        int caseCapacity = Math.Max(1, topRow.MaxGameCount / span);
+        int centeredCase = caseCapacity / 2;
+        int alignedSlot = centeredCase * span;
+        if (alignedSlot + span > topRow.MaxGameCount)
+            alignedSlot = Math.Max(0, topRow.MaxGameCount - span);
+
+        // A face-out game occupies four narrow BOXROOM grid cells. Choosing
+        // the geometrically nearest raw cell can split the row into unusable
+        // fragments. Centre on a whole-case boundary so five cases still fit.
+        if (topRow.IsCellOccupied(alignedSlot)) return false;
+        topRow.PlaceItem(refreshGame, alignedSlot, MediaPlacement.FaceOut, playPlacedTween: false);
+        return topRow.IsCellOccupied(alignedSlot);
     }
 
     private sealed class TaskWait
@@ -170,34 +164,3 @@ public sealed class ItchStandController : MonoBehaviour, IPlaceable
         public Exception Exception => task.Exception?.GetBaseException();
     }
 }
-
-public sealed class ItchRefreshButton : MonoBehaviour, IInteractable
-{
-    public void OnInteract() => GetComponentInParent<ItchStandController>()?.RequestRefresh();
-    public void OnAlternateInteract() => OnInteract();
-}
-
-// The controller is added after the native rack prefab was deserialized, so it
-// is not part of PlacementTag's original UnityEvent listener list. This relay
-// activates it only after BOXROOM commits placement, never while it is a preview.
-internal sealed class ItchStandPlacementRelay : MonoBehaviour
-{
-    private UnityEvent placedEvent;
-    private UnityAction listener;
-
-    private void Awake()
-    {
-        PlacementTag tag = GetComponent<PlacementTag>();
-        ItchStandController controller = GetComponent<ItchStandController>();
-        placedEvent = AccessTools.Field(typeof(PlacementTag), "onPlaced")?.GetValue(tag) as UnityEvent;
-        if (placedEvent == null || controller == null) return;
-        listener = controller.OnPlaced;
-        placedEvent.AddListener(listener);
-    }
-
-    private void OnDestroy()
-    {
-        if (placedEvent != null && listener != null) placedEvent.RemoveListener(listener);
-    }
-}
-

@@ -3,12 +3,13 @@
   "id": "boxroom-itch-stand",
   "name": "The Itch Stand",
   "author": "Rusty",
-  "description": "A daily, refreshable rental-style stand of free itch.io games with inspect-only cases.",
+  "description": "A configurable, refreshable rental-style stand for discovering itch.io games with native inspect-only cases.",
+  "repository": "https://github.com/MidgetBrony/Boxroom-ItchStand",
   "requirements": { "melonLoader": "0.7.0" },
   "dependencies": [
     {
-      "manifest": "https://raw.githubusercontent.com/MidgetBrony/BR-MediaAPI/master/manifest.json",
-      "minimumVersion": "1.1.16",
+      "manifest": "https://raw.githubusercontent.com/MidgetBrony/ModsPanel/refs/heads/master/manifest.json",
+      "minimumVersion": "2.4.2",
       "required": true
     }
   ],

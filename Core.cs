@@ -1,6 +1,6 @@
-using BR_MediaAPI;
 using HarmonyLib;
 using MelonLoader;
+using SteamShelf;
 using SteamShelf.Media;
 using SteamShelf.Placeables;
 using SteamShelf.PlayerTools;
@@ -10,15 +10,14 @@ using System.Linq;
 using System.Threading.Tasks;
 using UnityEngine;
 
-[assembly: MelonInfo(typeof(Boxroom_ItchStand.Core), "The Itch Stand", "0.1.9", "Rusty", null)]
+[assembly: MelonInfo(typeof(Boxroom_ItchStand.Core), "The Itch Stand", "1.0.0", "Rusty", null)]
 [assembly: MelonGame("NestedLoop", "BOXROOM")]
-[assembly: MelonAdditionalDependencies("BR_MediaAPI")]
+[assembly: MelonAdditionalDependencies("ModsPanel")]
 
 namespace Boxroom_ItchStand;
 
 public sealed class Core : MelonMod
 {
-    internal const int MediaTypeId = 18101;
     internal const string PlaceableId = "Boxroom_ItchStand_RentalRack";
     internal static PlaceableData Data;
     internal static PlaceableData Template;
@@ -27,12 +26,15 @@ public sealed class Core : MelonMod
     public override void OnInitializeMelon()
     {
         Log = LoggerInstance;
-        RegisterMediaType();
+        ItchStandSettings.Initialize();
+        SteamLibrarySystem.OnLibraryReady += OnNativeGameLibraryReady;
         CreatePlaceableData();
         RegisterPlaceableDataLive();
         ItchLibrary.Instance.LoadCache();
+        if (SteamLibrarySystem.GetConfig() != null)
+            ItchLibrary.Instance.OnNativeGameLibraryReady();
         _ = ItchLibrary.Instance.EnsureDailySelectionAsync();
-        LoggerInstance.Msg("The Itch Stand 0.1.9 initialized locally.");
+        LoggerInstance.Msg("The Itch Stand 1.0.0 initialized with fast paginated itch.io discovery.");
     }
 
     public override void OnDeinitializeMelon()
@@ -40,7 +42,7 @@ public sealed class Core : MelonMod
         try
         {
             BoxInspector inspector = UnityEngine.Object.FindFirstObjectByType<BoxInspector>();
-            if (inspector?.heldMediaInfo is ItchGameItem)
+            if (inspector?.heldInfo is SteamGameData game && ItchLibrary.Instance.IsManagedGame(game))
                 AccessTools.Method(typeof(BoxInspector), "EndView")?.Invoke(inspector, null);
         }
         catch (Exception exception)
@@ -52,8 +54,9 @@ public sealed class Core : MelonMod
             if (stand != null && stand.gameObject.scene.IsValid())
                 UnityEngine.Object.DestroyImmediate(stand.gameObject);
 
+        SteamLibrarySystem.OnLibraryReady -= OnNativeGameLibraryReady;
+        ItchStandSettings.Shutdown();
         ItchLibrary.Instance.Shutdown();
-        MediaApi.Unregister("com.rusty.boxroom.itch-stand");
         ItchStandFactory.ReleaseResources();
         if (Data != null)
         {
@@ -72,33 +75,9 @@ public sealed class Core : MelonMod
         Log = null;
     }
 
-    private static void RegisterMediaType()
+    private static void OnNativeGameLibraryReady(IReadOnlyList<SteamGameData> _)
     {
-        var definition = new MediaTypeDefinition
-        {
-            Id = MediaTypeId,
-            Key = "com.rusty.boxroom.itch-stand",
-            DisplayName = "itch.io Games",
-            ModelType = typeof(ItchGameItem),
-            Library = ItchLibrary.Instance,
-            AllowOnShelves = true,
-            UseGenericInteractionLifecycle = true,
-            CreateUnplacedMediaBox = false,
-            Inspect = new MediaInspectDefinition
-            {
-                PrimaryActionLabel = "View on itch.io",
-                OnPrimaryAction = context =>
-                {
-                    if (context.Item is ItchGameItem game && Uri.TryCreate(game.Url, UriKind.Absolute, out _))
-                        Application.OpenURL(game.Url);
-                }
-            }
-        };
-
-        // Itch games use BOXROOM's native GameBox shelf and inspector models.
-        // No loose prefab is registered, so these cases can never become furniture.
-        NativeGameBoxVisuals.Configure(definition);
-        MediaApi.Register(definition);
+        ItchLibrary.Instance.OnNativeGameLibraryReady();
     }
 
     private static void CreatePlaceableData()
@@ -199,11 +178,49 @@ internal static class PlaceableSpritePatch
     }
 }
 
+// Follow BOXROOM's native shelf lifecycle exactly. ObjectPlacementTool calls
+// Shelf.OnPlaced for a new rack; RoomDataManager calls PopulateFromLoad for a
+// restored rack. Shelf remains the sole IPlaceable and save-state owner.
+[HarmonyPatch(typeof(Shelf), nameof(Shelf.OnPlaced))]
+internal static class ItchStandPlacedPatch
+{
+    private static void Postfix(Shelf __instance)
+    {
+        if (__instance?.GetComponent<PlacementTag>()?.PlaceableData?.ID != Core.PlaceableId) return;
+        __instance.GetComponent<ItchStandController>()?.OnNativeShelfReady();
+    }
+}
+
+[HarmonyPatch(typeof(Shelf), nameof(Shelf.PopulateFromLoad))]
+internal static class ItchStandLoadedPatch
+{
+    private static void Postfix(Shelf __instance)
+    {
+        if (__instance?.GetComponent<PlacementTag>()?.PlaceableData?.ID != Core.PlaceableId) return;
+        __instance.GetComponent<ItchStandController>()?.OnNativeShelfReady();
+    }
+}
+
+// Shelf is BOXROOM's actual IPlaceable for the cloned rack. Mirror its pickup
+// lifecycle so the Itch controller can refill when the same rack is placed again.
+[HarmonyPatch(typeof(Shelf), nameof(Shelf.OnPickedUp))]
+internal static class ItchStandPickedUpPatch
+{
+    private static void Postfix(Shelf __instance)
+    {
+        if (__instance?.GetComponent<PlacementTag>()?.PlaceableData?.ID != Core.PlaceableId) return;
+        __instance.GetComponent<ItchStandController>()?.OnNativeShelfPickedUp();
+    }
+}
+
 // The native primary action normally removes a case and starts the placement
 // tool. On this stand it invokes BOXROOM's own inspect-in-place path instead.
 [HarmonyPatch(typeof(PlayerInteractionTool), "PickupOrPlaceFromCurrentMediaContainer")]
 internal static class InspectOnlyStandPatch
 {
+    private static readonly System.Reflection.MethodInfo InspectInPlace =
+        AccessTools.Method(typeof(PlayerInteractionTool), "TryInspectLookedAtMediaInPlace");
+
     private static bool Prefix(
         PlayerInteractionTool __instance,
         PlaceableMediaContainer ___currentLookingAtContainer,
@@ -213,61 +230,45 @@ internal static class InspectOnlyStandPatch
             ___currentLookingAtContainer.GetComponentInParent<ItchStandController>() == null)
             return true;
 
-        if (___currentLookingAtShelfItem?.ItemInfo is ItchGameItem game)
-            ItchInspectRuntime.Open(__instance, game, "primary");
+        ItchStandController controller =
+            ___currentLookingAtContainer.GetComponentInParent<ItchStandController>();
+        if (___currentLookingAtShelfItem?.ItemInfo is SteamGameData refreshGame &&
+            ItchLibrary.Instance.IsRefreshGame(refreshGame))
+        {
+            controller.RequestRefresh();
+            return false;
+        }
+
+        // Use BOXROOM's own TryInspectLookedAtMediaInPlace path. Returning
+        // false prevents PickupItem/PlaceItem from ever running on this shelf.
+        if (___currentLookingAtShelfItem?.ItemInfo is SteamGameData game &&
+            ItchLibrary.Instance.IsManagedGame(game))
+            InspectInPlace?.Invoke(__instance, null);
         return false;
     }
 }
 
-// BOXROOM exposes shelf inspection on the secondary/Open binding as well as on
-// the primary pickup path. Both must use the same forced transition or one of
-// the controls can silently remain on PlayerInteraction.
+// BOXROOM also exposes inspect-in-place on its alternate interaction. The
+// refresh case should reroll from either binding and should never open the
+// ordinary game inspector.
 [HarmonyPatch(typeof(PlayerInteractionTool), "TryInspectLookedAtMediaInPlace")]
-internal static class InspectOnlyStandSecondaryPatch
+internal static class RefreshCaseAlternateInteractionPatch
 {
     private static bool Prefix(
-        PlayerInteractionTool __instance,
         PlaceableMediaContainer ___currentLookingAtContainer,
         IShelfItem ___currentLookingAtShelfItem,
         ref bool __result)
     {
-        if (___currentLookingAtContainer == null ||
-            ___currentLookingAtContainer.GetComponentInParent<ItchStandController>() == null ||
-            ___currentLookingAtShelfItem?.ItemInfo is not ItchGameItem game)
+        ItchStandController controller =
+            ___currentLookingAtContainer?.GetComponentInParent<ItchStandController>();
+        if (controller == null ||
+            ___currentLookingAtShelfItem?.ItemInfo is not SteamGameData game ||
+            !ItchLibrary.Instance.IsRefreshGame(game))
             return true;
 
-        __result = ItchInspectRuntime.Open(__instance, game, "secondary");
+        controller.RequestRefresh();
+        __result = true;
         return false;
-    }
-}
-
-internal static class ItchInspectRuntime
-{
-    private static readonly System.Reflection.FieldInfo Controller =
-        AccessTools.Field(typeof(PlayerTool), "controller");
-
-    internal static bool Open(PlayerInteractionTool interaction, ItchGameItem game, string route)
-    {
-        PlayerToolController controller = Controller?.GetValue(interaction) as PlayerToolController;
-        BoxInspector inspector = controller?.GetToolClass<BoxInspector>();
-        if (controller == null || inspector == null)
-        {
-            Core.Log?.Error($"Inspect ({route}) could not find BOXROOM's inspector tool.");
-            return false;
-        }
-
-        try
-        {
-            inspector.BeginInspectInPlace(game, null);
-            controller.SetActiveTool(EToolType.None, force: true);
-            Core.Log?.Msg($"Inspect ({route}) opened '{game.DisplayName}' in place.");
-            return true;
-        }
-        catch (Exception exception)
-        {
-            Core.Log?.Error($"Inspect ({route}) failed for '{game.DisplayName}': {exception}");
-            return false;
-        }
     }
 }
 
