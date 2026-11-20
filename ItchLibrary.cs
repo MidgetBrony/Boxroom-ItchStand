@@ -38,6 +38,7 @@ internal sealed class ItchCatalogCache
     public int Version { get; set; } = 6;
     public string CatalogDate { get; set; } = string.Empty;
     public string FilterSignature { get; set; } = string.Empty;
+    public string LastCatalogAttemptUtc { get; set; } = string.Empty;
     public int Reroll { get; set; }
     public List<ItchCatalogEntry> Entries { get; set; } = new();
 
@@ -58,6 +59,7 @@ public sealed class ItchLibrary
     private const string RefreshMarker = "boxroom-itch-refresh";
     private const int SelectionSize = 29;
     private const int ScreenshotLimit = 3;
+    private static readonly TimeSpan AutomaticCatalogRetryInterval = TimeSpan.FromHours(2);
     private static readonly HttpClient Client = CreateClient();
     private static readonly Regex Tags = new("<[^>]+>", RegexOptions.Compiled);
     private static readonly Regex ScreenshotAnchors = new(
@@ -118,6 +120,11 @@ public sealed class ItchLibrary
 
         cache.NativeAppIds ??= new List<int>();
         cache.Entries ??= new List<ItchCatalogEntry>();
+        if (string.IsNullOrWhiteSpace(cache.LastCatalogAttemptUtc) && File.Exists(CachePath))
+        {
+            cache.LastCatalogAttemptUtc = new DateTimeOffset(
+                File.GetLastWriteTimeUtc(CachePath), TimeSpan.Zero).ToString("O");
+        }
         foreach (ItchCatalogEntry entry in cache.Entries.Where(entry => entry != null))
             entry.ScreenshotUrls ??= new List<string>();
         if (!SteamLibrarySystem.IsCustomAppId(cache.RefreshAppId) &&
@@ -219,7 +226,8 @@ public sealed class ItchLibrary
             bool needsCatalogue = cache.Entries.Count < SelectionSize ||
                 !string.Equals(cache.CatalogDate, today, StringComparison.Ordinal) ||
                 !string.Equals(cache.FilterSignature, ItchStandSettings.Signature, StringComparison.Ordinal);
-            if (needsCatalogue)
+            DateTimeOffset nextAttempt = DateTimeOffset.UtcNow;
+            if (needsCatalogue && IsAutomaticCatalogAttemptDue(out nextAttempt))
             {
                 try
                 {
@@ -229,6 +237,12 @@ public sealed class ItchLibrary
                 {
                     Core.Log?.Warning($"itch.io catalogue refresh failed; using cached games: {exception.Message}");
                 }
+            }
+            else if (needsCatalogue)
+            {
+                Core.Log?.Msg(
+                    $"Itch Stand is using its cached catalogue; the next automatic itch.io check is after " +
+                    $"{nextAttempt.ToLocalTime():HH:mm}.");
             }
 
             selectedEntries = SelectEntries();
@@ -318,6 +332,8 @@ public sealed class ItchLibrary
 
     private async Task ReplaceCatalogueAsync(string catalogDate)
     {
+        cache.LastCatalogAttemptUtc = DateTimeOffset.UtcNow.ToString("O");
+        SaveCache();
         List<ItchCatalogEntry> fresh = await DownloadCatalogueAsync();
         if (fresh.Count < SelectionSize)
             throw new InvalidOperationException(
@@ -331,6 +347,18 @@ public sealed class ItchLibrary
         Core.Log?.Msg(
             $"Itch Stand catalogue contains {fresh.Count} games from " +
             $"{ItchStandSettings.PageCount} page(s) per filter ({cache.FilterSignature}).");
+    }
+
+    private bool IsAutomaticCatalogAttemptDue(out DateTimeOffset nextAttempt)
+    {
+        if (!DateTimeOffset.TryParse(cache.LastCatalogAttemptUtc, out DateTimeOffset lastAttempt))
+        {
+            nextAttempt = DateTimeOffset.UtcNow;
+            return true;
+        }
+
+        nextAttempt = lastAttempt.ToUniversalTime() + AutomaticCatalogRetryInterval;
+        return DateTimeOffset.UtcNow >= nextAttempt;
     }
 
     private async Task SynchronizeNativeCustomGamesAsync(int expectedGeneration = -1)
@@ -780,7 +808,7 @@ public sealed class ItchLibrary
     private static HttpClient CreateClient()
     {
         var client = new HttpClient { Timeout = TimeSpan.FromSeconds(25) };
-        client.DefaultRequestHeaders.UserAgent.ParseAdd("Boxroom-ItchStand/1.0.0 (+https://itch.io)");
+        client.DefaultRequestHeaders.UserAgent.ParseAdd("Boxroom-ItchStand/1.0.2 (+https://itch.io)");
         return client;
     }
 

@@ -10,7 +10,7 @@ using System.Linq;
 using System.Threading.Tasks;
 using UnityEngine;
 
-[assembly: MelonInfo(typeof(Boxroom_ItchStand.Core), "The Itch Stand", "1.0.0", "Rusty", null)]
+[assembly: MelonInfo(typeof(Boxroom_ItchStand.Core), "The Itch Stand", "1.0.2", "Rusty", null)]
 [assembly: MelonGame("NestedLoop", "BOXROOM")]
 [assembly: MelonAdditionalDependencies("ModsPanel")]
 
@@ -34,7 +34,7 @@ public sealed class Core : MelonMod
         if (SteamLibrarySystem.GetConfig() != null)
             ItchLibrary.Instance.OnNativeGameLibraryReady();
         _ = ItchLibrary.Instance.EnsureDailySelectionAsync();
-        LoggerInstance.Msg("The Itch Stand 1.0.0 initialized with fast paginated itch.io discovery.");
+        LoggerInstance.Msg("The Itch Stand 1.0.2 initialized with fast paginated itch.io discovery.");
     }
 
     public override void OnDeinitializeMelon()
